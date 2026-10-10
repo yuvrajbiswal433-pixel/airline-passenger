@@ -1,0 +1,21 @@
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: airline-backend
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: airline-frontend
+    ports:
+      - "8501:8501"
+    environment:
+      API_URL: http://backend:8000/predict
+    depends_on:
+      - backend
