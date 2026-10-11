@@ -5,6 +5,7 @@ from math import cos, pi, sin
 import os
 import requests
 import streamlit as st
+import time
 
 # ---------------- Page Configuration ----------------
 st.set_page_config(
@@ -152,7 +153,21 @@ def backend_online(url):
     except requests.exceptions.RequestException:
         return False
 
+def wake_up_backend(max_attempts=18):
+    for attempt in range(max_attempts):
+        try:
+            response = requests.get(
+                f"{API_BASE}/docs",
+                timeout=10
+            )
+            if response.status_code == 200:
+                return True
+        except requests.exceptions.RequestException:
+            pass
 
+        time.sleep(5)
+
+    return False
 # ---------------- Custom Styling ----------------
 st.markdown(
     """
@@ -603,36 +618,63 @@ with right:
     st.markdown("<br>", unsafe_allow_html=True)
     predict_clicked = st.button("Predict satisfaction ✈️", type="primary", use_container_width=True)
 
+    
     if predict_clicked:
         try:
-            with st.spinner("Checking the passenger's details..."):
-                response = requests.post(API_URL, json=payload, timeout=30)
+            with st.spinner("Waking up the backend..."):
+                backend_ready = wake_up_backend()
 
-            if response.status_code == 200:
-                data = response.json()
-                st.session_state.result = {
-                    "prediction": data["prediction"],
-                    "probability": data["probability"],
-                    "payload": dict(payload),
-                }
-                pct_now = max(0.0, min(1.0, float(data["probability"]))) * 100
-                st.session_state.history.append(
-                    {
+            if not backend_ready:
+                st.error(
+                    "The backend is taking too long to respond. "
+                    "Please try again shortly."
+                )
+            else:
+                with st.spinner("Predicting passenger satisfaction..."):
+                    response = requests.post(
+                        API_URL,
+                        json=payload,
+                        timeout=60
+                    )
+
+                if response.status_code == 200:
+                    data = response.json()
+
+                    st.session_state.result = {
+                        "prediction": data["prediction"],
+                        "probability": data["probability"],
+                        "payload": dict(payload),
+                    }
+
+                    pct_now = (
+                        max(0.0, min(1.0, float(data["probability"])))
+                        * 100
+                    )
+
+                    st.session_state.history.append({
                         "ok": data["prediction"] == "Satisfied",
-                        "label": "Satisfied" if data["prediction"] == "Satisfied" else str(data["prediction"]),
+                        "label": (
+                            "Satisfied"
+                            if data["prediction"] == "Satisfied"
+                            else str(data["prediction"])
+                        ),
                         "pct": pct_now,
                         "cls": payload["Class"],
                         "time": datetime.now().strftime("%H:%M"),
-                    }
-                )
-                st.toast("Prediction ready", icon="✅")
-            else:
-                st.error(f"API error ({response.status_code}): {response.text}")
+                    })
+
+                    st.toast("Prediction ready", icon="✅")
+
+                else:
+                    st.error(
+                        f"API error ({response.status_code}): "
+                        f"{response.text}"
+                    )
 
         except requests.exceptions.ConnectionError:
             st.error(
-                "Can't reach the FastAPI backend at "
-                f"{API_URL}. Start the backend and try again."
+                f"Can't reach the FastAPI backend at {API_URL}. "
+                "Please try again shortly."
             )
 
         except requests.exceptions.RequestException as error:
@@ -640,7 +682,10 @@ with right:
 
     if st.session_state.result:
         is_stale = st.session_state.result["payload"] != payload
-        st.markdown(result_html(st.session_state.result, is_stale), unsafe_allow_html=True)
+        st.markdown(
+            result_html(st.session_state.result, is_stale),
+            unsafe_allow_html=True
+        )
 
 # ---------------- History ----------------
 if st.session_state.history:
